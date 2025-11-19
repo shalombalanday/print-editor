@@ -9,8 +9,10 @@
     .canvas-wrap { background: #ddd; padding: 12px; border-radius: 8px; display:flex; justify-content:center; }
     canvas { border: 1px solid #999; background: #fff; }
     label { font-size: 14px; }
-    .small { font-size:12px; color:#555; margin-bottom:8px; }
-    input[type=file], select, input[type=range], button { padding:6px 8px; border-radius:6px; border:1px solid #bbb; }
+    .small { font-size: 12px; color:#555; }
+    input[type=file], select, input[type=range], button {
+      padding:6px 8px; border-radius:6px; border:1px solid #bbb;
+    }
     button { cursor:pointer; background:white; }
   </style>
 </head>
@@ -21,13 +23,13 @@
 <div class="toolbar">
   <label>Template:
     <select id="templateSelect">
-      <option value="71x31">71 × 31 cm</option>
-      <option value="81x31">81 × 31 cm</option>
-      <option value="91x41">91 × 41 cm</option>
+      <option value="71x31">71 cm × 31 cm</option>
+      <option value="81x31">81 cm × 31 cm</option>
+      <option value="91x41">91 cm × 41 cm</option>
     </select>
   </label>
 
-  <label>Upload:
+  <label>Upload image:
     <input type="file" id="fileInput" accept="image/*">
   </label>
 
@@ -36,13 +38,13 @@
   </label>
 
   <button id="fitBtn">Fit Template</button>
-  <button id="centerBtn">Center</button>
-  <button id="toggleBleedBtn">Toggle Bleed</button>
-  <button id="downloadBtn">Download PNG</button>
+  <button id="centerBtn">Center Image</button>
+  <button id="toggleBleedBtn">Toggle Bleed Guide</button>
+  <button id="downloadBtn">Download PNG (300 DPI)</button>
 </div>
 
 <div class="small">
-  Tip: Drag image to move, use corners to scale, rotate, stretch, etc.
+  Tip: Use corner handles to scale uniformly. Bleed guide shows safe printing area.
 </div>
 
 <div class="canvas-wrap" id="canvasWrap">
@@ -50,201 +52,234 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
-
 <script>
-document.addEventListener("DOMContentLoaded", function() {
+document.addEventListener("DOMContentLoaded", function(){
 
-  // Delay initialization to avoid GitHub Pages rendering 0-size canvas
-  setTimeout(initApp, 200);
+  const CM_TO_IN = 0.393700787;
+  const DPI = 300;
+  const PREVIEW_WIDTH = Math.min(1200, window.innerWidth - 80);
 
-  function initApp(){
+  const TEMPLATES = {
+    "71x31": { w_cm:71, h_cm:31 },
+    "81x31": { w_cm:81, h_cm:31 },
+    "91x41": { w_cm:91, h_cm:41 }
+  };
 
-    const CM_TO_IN = 0.393700787;
-    const DPI = 300;
+  const BLEED_CM = 0.5;
+  let bleedVisible = true;
 
-    const TEMPLATES = {
-      '71x31': { w_cm:71, h_cm:31 },
-      '81x31': { w_cm:81, h_cm:31 },
-      '91x41': { w_cm:91, h_cm:41 }
-    };
+  const canvas = new fabric.Canvas("c", {
+    preserveObjectStacking: true,
+    selection: true,
+    backgroundColor: "#fff"
+  });
 
-    const BLEED_CM = 0.5;
-    let bleedVisible = true;
+  let templateRect = null;
+  let bleedRect = null;
 
-    const canvas = new fabric.Canvas('c', {
-      preserveObjectStacking:true,
-      selection:true,
-      backgroundColor:'#fff'
+  //---------------------------
+  // Canvas Size Setup
+  //---------------------------
+  function setCanvasSize(templateKey){
+    const tpl = TEMPLATES[templateKey];
+    const aspect = tpl.w_cm / tpl.h_cm;
+    const width = PREVIEW_WIDTH;
+    const height = Math.round(width / aspect);
+
+    canvas.setWidth(width);
+    canvas.setHeight(height);
+
+    document.getElementById("canvasWrap").style.height = (height + 24) + "px";
+  }
+
+  //---------------------------
+  // Draw Template + Bleed
+  //---------------------------
+  function drawTemplate(templateKey){
+    if(templateRect) canvas.remove(templateRect);
+    if(bleedRect) canvas.remove(bleedRect);
+
+    const w = canvas.getWidth();
+    const h = canvas.getHeight();
+    const tpl = TEMPLATES[templateKey];
+
+    templateRect = new fabric.Rect({
+      left:0, top:0, width:w, height:h,
+      fill:"rgba(0,0,0,0)",
+      stroke:"#FF6B00",
+      strokeWidth:2,
+      selectable:false,
+      evented:false
     });
+    canvas.add(templateRect);
+    templateRect.sendToBack();
 
-    let templateRect = null;
-    let bleedRect = null;
-
-    function setCanvasSize(templateKey){
-      const tpl = TEMPLATES[templateKey];
-      const aspect = tpl.w_cm / tpl.h_cm;
-
-      const maxWidth = Math.min(1200, window.innerWidth - 40);
-      const width = maxWidth;
-      const height = Math.round(width / aspect);
-
-      canvas.setWidth(width);
-      canvas.setHeight(height);
-
-      document.getElementById("canvasWrap").style.height = (height + 24) + "px";
-    }
-
-    function drawTemplate(templateKey){
-      if(templateRect) canvas.remove(templateRect);
-      if(bleedRect) canvas.remove(bleedRect);
-
-      const w = canvas.getWidth();
-      const h = canvas.getHeight();
-      const tpl = TEMPLATES[templateKey];
-
-      templateRect = new fabric.Rect({
-        left:0, top:0,
-        width:w, height:h,
-        fill:'rgba(0,0,0,0)',
-        stroke:'#FF6B00',
-        strokeWidth:2,
-        selectable:false
+    if(bleedVisible){
+      const bleedPx = BLEED_CM / tpl.w_cm * w;
+      bleedRect = new fabric.Rect({
+        left:bleedPx, top:bleedPx,
+        width:w - bleedPx*2,
+        height:h - bleedPx*2,
+        fill:"rgba(0,0,0,0)",
+        stroke:"#00AA00",
+        strokeWidth:1,
+        selectable:false,
+        evented:false
       });
-      canvas.add(templateRect);
-      templateRect.sendToBack();
-
-      if(bleedVisible){
-        const bleedPx = (BLEED_CM / tpl.w_cm) * w;
-        bleedRect = new fabric.Rect({
-          left:bleedPx, top:bleedPx,
-          width:w - 2*bleedPx,
-          height:h - 2*bleedPx,
-          fill:'rgba(0,0,0,0)',
-          stroke:'#00AA00',
-          strokeWidth:1,
-          selectable:false
-        });
-        canvas.add(bleedRect);
-        bleedRect.sendToBack();
-      }
-
-      canvas.requestRenderAll();
+      canvas.add(bleedRect);
+      bleedRect.sendToBack();
     }
 
-    // -----------------------------
-    // Upload image — FIXED
-    // -----------------------------
-    document.getElementById("fileInput").addEventListener("change", function(e){
-      const file = e.target.files[0];
-      if(!file) return;
+    canvas.requestRenderAll();
+  }
 
-      const reader = new FileReader();
-      reader.onload = function(event){
-        const dataUrl = event.target.result;
+  //---------------------------
+  // ROBUST FILE UPLOAD HANDLER
+  //---------------------------
+  document.getElementById("fileInput").addEventListener("change", function(e){
+    const file = e.target.files[0];
+    if(!file) return alert("No file selected.");
+
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      const dataUrl = ev.target.result;
+
+      const MAX_RETRY = 10;
+      let attempt = 0;
+
+      function tryLoad(){
+        attempt++;
+        const cw = canvas.getWidth();
+        const ch = canvas.getHeight();
+
+        console.log(`[upload] attempt ${attempt} — canvas ${cw}x${ch}`);
+
+        if((cw === 0 || ch === 0) && attempt < MAX_RETRY){
+          setTimeout(tryLoad, 120);
+          return;
+        }
+
+        if(cw === 0 || ch === 0){
+          console.warn("Canvas still zero — forcing fallback size.");
+          canvas.setWidth(1000);
+          canvas.setHeight(500);
+        }
 
         fabric.Image.fromURL(dataUrl, function(img){
-
-          // Fallback: re-check canvas size after load
-          const cw = canvas.getWidth() || 900;
-          const ch = canvas.getHeight() || 400;
+          const W = canvas.getWidth();
+          const H = canvas.getHeight();
 
           img.set({
-            left: cw/2,
-            top: ch/2,
-            originX:"center",
-            originY:"center",
-            selectable:true
+            left: W/2,
+            top: H/2,
+            originX: "center",
+            originY: "center",
+            selectable: true
           });
 
-          const scale = Math.min(cw / img.width, ch / img.height) * 0.9;
+          const scale = Math.min(W / img.width, H / img.height) * 0.9;
           img.scale(scale);
 
           canvas.add(img);
           canvas.setActiveObject(img);
           canvas.requestRenderAll();
 
-        }, { crossOrigin: "anonymous" }); 
-      };
+        }, { crossOrigin: "anonymous" });
+      }
 
-      reader.readAsDataURL(file);
+      tryLoad();
+    };
+
+    reader.readAsDataURL(file);
+  });
+
+  //---------------------------
+  // Zoom
+  //---------------------------
+  document.getElementById("zoomSlider").addEventListener("input", function(){
+    canvas.setZoom(parseInt(this.value) / 100);
+    canvas.requestRenderAll();
+  });
+
+  //---------------------------
+  // Fit
+  //---------------------------
+  document.getElementById("fitBtn").addEventListener("click", function(){
+    const obj = canvas.getActiveObject();
+    if(!obj) return alert("Select an image first.");
+
+    const W = canvas.getWidth();
+    const H = canvas.getHeight();
+
+    obj.scaleToWidth(W * 0.9);
+    obj.scaleToHeight(H * 0.9);
+    obj.set({ left:W/2, top:H/2, originX:"center", originY:"center" });
+
+    canvas.requestRenderAll();
+  });
+
+  //---------------------------
+  // Center
+  //---------------------------
+  document.getElementById("centerBtn").addEventListener("click", function(){
+    const obj = canvas.getActiveObject();
+    if(!obj) return alert("Select an image first.");
+
+    obj.set({ left:canvas.getWidth()/2, top:canvas.getHeight()/2 });
+    canvas.requestRenderAll();
+  });
+
+  //---------------------------
+  // Toggle Bleed
+  //---------------------------
+  document.getElementById("toggleBleedBtn").addEventListener("click", function(){
+    bleedVisible = !bleedVisible;
+    drawTemplate(document.getElementById("templateSelect").value);
+  });
+
+  //---------------------------
+  // Template Change
+  //---------------------------
+  const tplSelect = document.getElementById("templateSelect");
+  tplSelect.addEventListener("change", function(){
+    setCanvasSize(this.value);
+    drawTemplate(this.value);
+  });
+
+  //---------------------------
+  // Initialize
+  //---------------------------
+  setCanvasSize(tplSelect.value);
+  drawTemplate(tplSelect.value);
+
+  //---------------------------
+  // Download (300 DPI)
+  //---------------------------
+  document.getElementById("downloadBtn").addEventListener("click", function(){
+    const tpl = TEMPLATES[tplSelect.value];
+    const w_in = tpl.w_cm * CM_TO_IN;
+    const h_in = tpl.h_cm * CM_TO_IN;
+
+    const pxW = Math.round(w_in * DPI);
+    const pxH = Math.round(h_in * DPI);
+
+    const multiplier = Math.min(pxW / canvas.getWidth(), pxH / canvas.getHeight());
+
+    canvas.discardActiveObject();
+    canvas.renderAll();
+
+    const url = canvas.toDataURL({
+      format: "png",
+      multiplier: multiplier,
+      quality: 1.0
     });
 
-    // -----------------------------
-    // Zoom
-    // -----------------------------
-    document.getElementById("zoomSlider").addEventListener("input", function(){
-      const zoom = parseInt(this.value)/100;
-      canvas.setZoom(zoom);
-      canvas.requestRenderAll();
-    });
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `design_${tpl.w_cm}x${tpl.h_cm}_${DPI}dpi.png`;
+    a.click();
+  });
 
-    // -----------------------------
-    // Fit image
-    // -----------------------------
-    document.getElementById("fitBtn").addEventListener("click", function(){
-      const obj = canvas.getActiveObject();
-      if(!obj) return alert("Select an image first.");
-      const w = canvas.getWidth();
-      const h = canvas.getHeight();
-
-      obj.scaleToWidth(w * 0.9);
-      obj.scaleToHeight(h * 0.9);
-      obj.set({ left:w/2, top:h/2, originX:"center", originY:"center" });
-      canvas.requestRenderAll();
-    });
-
-    document.getElementById("centerBtn").addEventListener("click", function(){
-      const obj = canvas.getActiveObject();
-      if(!obj) return alert("Select an image first.");
-      obj.set({
-        left: canvas.getWidth()/2,
-        top: canvas.getHeight()/2,
-        originX:"center",
-        originY:"center"
-      });
-      canvas.requestRenderAll();
-    });
-
-    document.getElementById("toggleBleedBtn").addEventListener("click", function(){
-      bleedVisible = !bleedVisible;
-      drawTemplate(document.getElementById("templateSelect").value);
-    });
-
-    const tplSelect = document.getElementById("templateSelect");
-    tplSelect.addEventListener("change", function(){
-      setCanvasSize(this.value);
-      drawTemplate(this.value);
-    });
-
-    setCanvasSize(tplSelect.value);
-    drawTemplate(tplSelect.value);
-
-    document.getElementById("downloadBtn").addEventListener("click", function(){
-      const tpl = TEMPLATES[tplSelect.value];
-      const w_in = tpl.w_cm * CM_TO_IN;
-      const h_in = tpl.h_cm * CM_TO_IN;
-
-      const targetW = Math.round(w_in * DPI);
-      const targetH = Math.round(h_in * DPI);
-
-      const multiplier = Math.min(targetW / canvas.getWidth(), targetH / canvas.getHeight());
-
-      canvas.discardActiveObject();
-      canvas.renderAll();
-
-      const dataURL = canvas.toDataURL({
-        format:'png',
-        multiplier: multiplier,
-        quality:1.0
-      });
-
-      const link = document.createElement("a");
-      link.href = dataURL;
-      link.download = `design_${tpl.w_cm}x${tpl.h_cm}_${DPI}dpi.png`;
-      link.click();
-    });
-
-  } // end initApp
 });
 </script>
 
